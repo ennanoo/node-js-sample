@@ -1,0 +1,64 @@
+version: 2.1
+
+orbs:
+  docker: circleci/docker@2.0.1
+
+jobs:
+  build:
+    machine: true
+    steps:
+      - checkout
+      - docker/build:
+          image: $DOCKERHUB_USERNAME/my-node-app
+          tag: latest
+      - run:
+          name: Save Docker image as tarball
+          command: docker save $DOCKERHUB_USERNAME/my-node-app:latest | gzip > my-node-app.tar.gz
+      - persist_to_workspace:
+          root: .
+          paths:
+            - my-node-app.tar.gz
+
+  test:
+    machine: true
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Load Docker image
+          command: gunzip -c ./my-node-app.tar.gz | docker load
+      - run:
+          name: Run Docker container
+          command: docker run -d -p 8080:8080 --name my-node-app $DOCKERHUB_USERNAME/my-node-app
+      - run:
+          name: Test Docker container
+          command: curl --fail http://localhost:8080 || (docker logs my-node-app && exit 1)
+
+  push:
+    machine: true
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Load Docker image
+          command: gunzip -c ./my-node-app.tar.gz | docker load
+      - docker/check:
+          docker-username: DOCKERHUB_USERNAME
+          docker-password: DOCKERHUB_PASSWORD
+      - docker/push:
+          image: $DOCKERHUB_USERNAME/my-node-app
+          tag: latest
+
+workflows:
+  version: 2
+  build-and-test:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+      - push:
+          requires:
+            - test
